@@ -1,8 +1,2 @@
 package com.example.shorts
-
-import java.io.File
-
-data class VideoItem(
-    val file: File,
-    val title: String
-)
+data class VideoItem(val url: String, val username: String, val caption: String, val likes: String, val comments: String, val shares: String)
