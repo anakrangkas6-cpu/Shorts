@@ -3,6 +3,7 @@ package com.example.shorts
 
 import android.net.Uri
 import android.os.Bundle
+import android.webkit.MimeTypeMap
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,13 +21,12 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(
             ActivityResultContracts.OpenMultipleDocuments()
         ) { uris ->
+
             if (uris.isNotEmpty()) {
                 var imported = 0
 
                 uris.forEach { uri ->
-                    if (importVideo(uri)) {
-                        imported++
-                    }
+                    if (importVideo(uri)) imported++
                 }
 
                 loadVideos()
@@ -45,46 +45,61 @@ class MainActivity : AppCompatActivity() {
 
         viewPager = findViewById(R.id.viewPager)
 
-        // Folder penyimpanan khusus aplikasi
+        // Folder privat Shorts
         shortsFolder = File(filesDir, "Shorts")
 
         if (!shortsFolder.exists()) {
             shortsFolder.mkdirs()
         }
 
-        // Pengaturan geser video
         viewPager.orientation = ViewPager2.ORIENTATION_VERTICAL
         viewPager.offscreenPageLimit = 1
 
+        // Hubungkan perpindahan halaman dengan pemutar video
+        viewPager.registerOnPageChangeCallback(
+            object : ViewPager2.OnPageChangeCallback() {
+                override fun onPageSelected(position: Int) {
+                    if (::adapter.isInitialized) {
+                        adapter.setActivePosition(position)
+                    }
+                }
+            }
+        )
+
         // Tombol tambah video
-        val btnAdd = findViewById<ImageView>(R.id.navAdd)
+        findViewById<ImageView>(R.id.navAdd)
+            .setOnClickListener {
+                videoPicker.launch(arrayOf("video/*"))
+            }
 
-        btnAdd.setOnClickListener {
-            videoPicker.launch(arrayOf("video/*"))
-        }
-
-        // Muat video lokal
         loadVideos()
     }
 
     private fun importVideo(uri: Uri): Boolean {
         return try {
             val mimeType = contentResolver.getType(uri)
+                ?: return false
 
-            if (mimeType?.startsWith("video/") != true) {
+            if (!mimeType.startsWith("video/")) {
                 return false
             }
 
-            val fileName = "video_${System.currentTimeMillis()}.mp4"
-            val destination = File(shortsFolder, fileName)
+            val extension = MimeTypeMap.getSingleton()
+                .getExtensionFromMimeType(mimeType)
+                ?: "mp4"
+
+            val file = File(
+                shortsFolder,
+                "video_${System.currentTimeMillis()}.$extension"
+            )
 
             contentResolver.openInputStream(uri)?.use { input ->
-                destination.outputStream().use { output ->
+                file.outputStream().use { output ->
                     input.copyTo(output)
                 }
             } ?: return false
 
-            destination.exists() && destination.length() > 0
+            file.exists() && file.length() > 0
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -93,6 +108,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadVideos() {
+
         val videoFiles = shortsFolder.listFiles()
             ?.filter {
                 it.isFile &&
