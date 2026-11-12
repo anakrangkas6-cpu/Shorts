@@ -11,9 +11,9 @@ class MainActivity : AppCompatActivity() {
 
         val viewPager = findViewById<ViewPager2>(R.id.viewPager)
         val videos = listOf(
-            VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb"),
-            VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb"),
-            VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb")
+            VideoItem("https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb"),
+            VideoItem("https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb"),
+            VideoItem("https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb")
         )
         viewPager.adapter = ShortsAdapter(videos)
         viewPager.orientation = ViewPager2.ORIENTATION_VERTICAL
