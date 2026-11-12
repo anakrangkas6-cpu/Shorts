@@ -1,37 +1,56 @@
 package com.example.shorts
 
-import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
-import android.widget.VideoView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.RecyclerView
 
-class ShortsAdapter(private val list: List<VideoItem>) : RecyclerView.Adapter<ShortsAdapter.Holder>() {
-    class Holder(v: View) : RecyclerView.ViewHolder(v) {
-        val video: VideoView = v.findViewById(R.id.videoView)
-        val likes: TextView = v.findViewById(R.id.tvLikes)
-        val subscribe: TextView = v.findViewById(R.id.btnSubscribe)
-        val likeBtn: View = v.findViewById(R.id.btnLike)
+class ShortsAdapter(private val videos: List<VideoItem>) : RecyclerView.Adapter<ShortsAdapter.ShortViewHolder>() {
+
+    class ShortViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val playerView: PlayerView = view.findViewById(R.id.playerView)
+        val tvUsername: TextView = view.findViewById(R.id.tvUsername)
+        val tvDesc: TextView = view.findViewById(R.id.tvDesc)
+        val tvLikes: TextView = view.findViewById(R.id.tvLikes)
+        val tvComments: TextView = view.findViewById(R.id.tvComments)
+        val tvShares: TextView = view.findViewById(R.id.tvShares)
+        var player: ExoPlayer? = null
     }
-    override fun onCreateViewHolder(p: ViewGroup, t: Int) = Holder(LayoutInflater.from(p.context).inflate(R.layout.item_short, p, false))
-    override fun getItemCount() = list.size
-    override fun onBindViewHolder(h: Holder, pos: Int) {
-        val item = list[pos]
-        h.likes.text = item.likes
-        h.video.setVideoURI(Uri.parse(item.url))
-        h.video.setOnPreparedListener { it.isLooping = true; h.video.start() }
-        var liked = false
-        h.likeBtn.setOnClickListener {
-            liked = !liked
-            h.likeBtn.alpha = if (liked) 1f else 0.7f
-        }
-        var sub = false
-        h.subscribe.setOnClickListener {
-            sub = !sub
-            h.subscribe.text = if (sub) "Subscribed" else "Subscribe"
-        }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ShortViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_short, parent, false)
+        return ShortViewHolder(view)
     }
-    override fun onViewRecycled(h: Holder) { h.video.stopPlayback(); super.onViewRecycled(h) }
+
+    override fun onBindViewHolder(holder: ShortViewHolder, position: Int) {
+        val video = videos[position]
+        holder.tvUsername.text = video.username
+        holder.tvDesc.text = video.description
+        holder.tvLikes.text = video.likes
+        holder.tvComments.text = video.comments
+        holder.tvShares.text = video.shares
+
+        holder.player?.release()
+        val player = ExoPlayer.Builder(holder.itemView.context).build()
+        holder.player = player
+        holder.playerView.player = player
+        holder.playerView.useController = false
+        player.setMediaItem(MediaItem.fromUri(video.videoUrl))
+        player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
+        player.prepare()
+        player.play()
+    }
+
+    override fun onViewRecycled(holder: ShortViewHolder) {
+        super.onViewRecycled(holder)
+        holder.player?.release()
+        holder.player = null
+    }
+
+    override fun getItemCount() = videos.size
 }
