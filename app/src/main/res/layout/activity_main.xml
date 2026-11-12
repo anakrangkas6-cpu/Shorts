@@ -1,5 +1,3 @@
-
-<?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -12,7 +10,6 @@
         android:layout_marginBottom="56dp"
         android:orientation="vertical" />
 
-    <!-- Garis merah -->
     <View
         android:layout_width="match_parent"
         android:layout_height="3dp"
@@ -20,7 +17,6 @@
         android:layout_marginBottom="56dp"
         android:background="#FF0000" />
 
-    <!-- Navigasi bawah -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="56dp"
@@ -37,8 +33,6 @@
             android:layout_weight="1"
             android:src="@drawable/ic_home"
             android:tint="#FFFFFF"
-            android:clickable="true"
-            android:focusable="true"
             android:contentDescription="Beranda" />
 
         <ImageView
@@ -48,8 +42,6 @@
             android:layout_weight="1"
             android:src="@drawable/ic_shorts_tab"
             android:tint="#FFFFFF"
-            android:clickable="true"
-            android:focusable="true"
             android:contentDescription="Shorts" />
 
         <ImageView
@@ -59,8 +51,6 @@
             android:layout_weight="1"
             android:src="@drawable/ic_add"
             android:tint="#FFFFFF"
-            android:clickable="true"
-            android:focusable="true"
             android:contentDescription="Tambah video" />
 
         <ImageView
@@ -70,8 +60,6 @@
             android:layout_weight="1"
             android:src="@drawable/ic_profile"
             android:tint="#FFFFFF"
-            android:clickable="true"
-            android:focusable="true"
             android:contentDescription="Profil" />
 
     </LinearLayout>
