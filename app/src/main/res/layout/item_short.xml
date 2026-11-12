@@ -1,14 +1,11 @@
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#000000">
+
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
 
+    <!-- Pemutar video -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/playerView"
         android:layout_width="match_parent"
@@ -40,6 +37,7 @@
             android:src="@drawable/ic_more"
             android:tint="#FFFFFF"
             android:contentDescription="Menu lainnya" />
+
     </LinearLayout>
 
     <!-- Tombol interaksi kanan -->
@@ -231,7 +229,8 @@
 
     </LinearLayout>
 
-            <ImageView
+    <!-- Piringan audio -->
+    <ImageView
         android:id="@+id/imgMusicDisc"
         android:layout_width="40dp"
         android:layout_height="40dp"
