@@ -1,36 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#000000">
+package com.example.shorts
 
-    <androidx.viewpager2.widget.ViewPager2
-        android:id="@+id/viewPager"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical" />
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.viewpager2.widget.ViewPager2
 
-    <!-- Garis merah progress bawah -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="3dp"
-        android:layout_gravity="bottom"
-        android:layout_marginBottom="56dp"
-        android:background="#FF0000" />
+class MainActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-    <!-- Bottom Nav persis screenshot -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:layout_gravity="bottom"
-        android:background="#000000"
-        android:orientation="horizontal"
-        android:gravity="center"
-        android:weightSum="4">
-
-        <ImageView android:layout_width="0dp" android:layout_height="28dp" android:layout_weight="1" android:src="@drawable/ic_home" android:tint="#FFFFFF" />
-        <ImageView android:layout_width="0dp" android:layout_height="28dp" android:layout_weight="1" android:src="@drawable/ic_shorts_tab" android:tint="#FFFFFF" />
-        <ImageView android:layout_width="0dp" android:layout_height="32dp" android:layout_weight="1" android:src="@drawable/ic_add" android:tint="#FFFFFF" />
-        <ImageView android:layout_width="0dp" android:layout_height="28dp" android:layout_weight="1" android:src="@drawable/ic_profile" android:tint="#FFFFFF" />
-    </LinearLayout>
-</FrameLayout>
+        val viewPager = findViewById<ViewPager2>(R.id.viewPager)
+        val videos = listOf(
+            VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb"),
+            VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb"),
+            VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", "@nurealam-h4z", "#shortsvideos", "74 rb", "298", "72 rb")
+        )
+        viewPager.adapter = ShortsAdapter(videos)
+        viewPager.orientation = ViewPager2.ORIENTATION_VERTICAL
+    }
+}
