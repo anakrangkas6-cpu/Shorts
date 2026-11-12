@@ -3,12 +3,13 @@ package com.example.shorts
 
 import android.content.Intent
 import android.graphics.Color
-import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -21,6 +22,8 @@ class ShortsAdapter(
     private var activePosition = RecyclerView.NO_POSITION
     private var recyclerView: RecyclerView? = null
 
+    private val likedPositions = mutableSetOf<Int>()
+
     class ShortViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val playerView: PlayerView = view.findViewById(R.id.playerView)
         val tvUsername: TextView = view.findViewById(R.id.tvUsername)
@@ -31,14 +34,15 @@ class ShortsAdapter(
 
         val btnLike: ImageView = view.findViewById(R.id.btnLike)
         val btnShare: ImageView = view.findViewById(R.id.btnShare)
+        val btnComment: ImageView = view.findViewById(R.id.btnComment)
+        val btnBookmark: ImageView = view.findViewById(R.id.btnBookmark)
 
         var player: ExoPlayer? = null
-        var liked = false
     }
 
-    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
-        super.onAttachedToRecyclerView(recyclerView)
-        this.recyclerView = recyclerView
+    override fun onAttachedToRecyclerView(rv: RecyclerView) {
+        super.onAttachedToRecyclerView(rv)
+        recyclerView = rv
     }
 
     override fun onCreateViewHolder(
@@ -65,57 +69,85 @@ class ShortsAdapter(
 
         releasePlayer(holder)
 
-        val player = ExoPlayer.Builder(holder.itemView.context).build()
+        val player = ExoPlayer.Builder(
+            holder.itemView.context
+        ).build()
+
         holder.player = player
         holder.playerView.player = player
         holder.playerView.useController = false
 
-        // Memutar file video lokal
         player.setMediaItem(
-            MediaItem.fromUri(Uri.fromFile(video.videoFile))
+            MediaItem.fromUri(video.videoFile.toURI().toString())
         )
 
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
         player.prepare()
 
-        // Hanya halaman aktif yang diputar
         if (position == activePosition) {
             player.play()
         } else {
             player.pause()
         }
 
-        // Tombol Like
-        holder.liked = false
-
-        holder.btnLike.setColorFilter(Color.WHITE)
+        // Like
+        holder.btnLike.setColorFilter(
+            if (position in likedPositions) Color.RED
+            else Color.WHITE
+        )
 
         holder.btnLike.setOnClickListener {
-            holder.liked = !holder.liked
-
-            holder.btnLike.setColorFilter(
-                if (holder.liked) Color.RED else Color.WHITE
-            )
-        }
-
-        // Tombol Bagikan
-        holder.btnShare.setOnClickListener {
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "video/*"
-                putExtra(
-                    Intent.EXTRA_STREAM,
-                    Uri.fromFile(video.videoFile)
-                )
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (position in likedPositions) {
+                likedPositions.remove(position)
+            } else {
+                likedPositions.add(position)
             }
 
-            holder.itemView.context.startActivity(
-                Intent.createChooser(intent, "Bagikan video")
+            holder.btnLike.setColorFilter(
+                if (position in likedPositions) Color.RED
+                else Color.WHITE
             )
         }
+
+        // Bagikan video melalui FileProvider
+        holder.btnShare.setOnClickListener {
+            try {
+                val context = holder.itemView.context
+
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    video.videoFile
+                )
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "video/*"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = android.content.ClipData.newUri(
+                        context.contentResolver,
+                        "Video Shorts",
+                        uri
+                    )
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                context.startActivity(
+                    Intent.createChooser(intent, "Bagikan video")
+                )
+
+            } catch (e: Exception) {
+                Toast.makeText(
+                    holder.itemView.context,
+                    "Gagal membagikan video",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        // Komentar dan simpan akan dihubungkan
+        // setelah sistem penyimpanan dan komentar dibuat.
     }
 
-    // Dipanggil ketika pengguna menggeser Shorts
     fun setActivePosition(position: Int) {
         if (position !in videos.indices) return
 
@@ -147,21 +179,18 @@ class ShortsAdapter(
         super.onViewRecycled(holder)
     }
 
-    override fun onDetachedFromRecyclerView(
-        recyclerView: RecyclerView
-    ) {
-        for (i in 0 until recyclerView.childCount) {
-            val holder = recyclerView.getChildViewHolder(
-                recyclerView.getChildAt(i)
-            ) as? ShortViewHolder
+    override fun onDetachedFromRecyclerView(rv: RecyclerView) {
+        for (i in 0 until rv.childCount) {
+            val holder = rv.getChildViewHolder(rv.getChildAt(i))
+                as? ShortViewHolder
 
             if (holder != null) {
                 releasePlayer(holder)
             }
         }
 
-        this.recyclerView = null
-        super.onDetachedFromRecyclerView(recyclerView)
+        recyclerView = null
+        super.onDetachedFromRecyclerView(rv)
     }
 
     override fun getItemCount(): Int = videos.size
