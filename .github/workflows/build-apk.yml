@@ -1,3 +1,4 @@
+
 name: Build Android APK
 
 on:
@@ -8,6 +9,7 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
 
       - name: Install dependencies and build web bundle
         run: |
-          npm install --no-audit --no-fund
+          npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
 
       - name: Initialize Capacitor Android project
@@ -45,11 +47,13 @@ jobs:
             const fs = require("fs");
             const file = process.argv[1];
             let xml = fs.readFileSync(file, "utf8");
+
             const perms = [
               "android.permission.READ_MEDIA_VIDEO",
               "android.permission.READ_MEDIA_IMAGES",
               "android.permission.READ_EXTERNAL_STORAGE"
             ];
+
             for (const p of perms) {
               if (!xml.includes(p)) {
                 xml = xml.replace(
@@ -58,6 +62,7 @@ jobs:
                 );
               }
             }
+
             fs.writeFileSync(file, xml);
           ' "$MANIFEST"
 
