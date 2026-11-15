@@ -1,1 +1,0 @@
-# Shorts app - no custom ProGuard rules yet.\n
