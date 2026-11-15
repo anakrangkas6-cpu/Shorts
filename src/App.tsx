@@ -21,6 +21,7 @@ import {
   scanDroppedItems,
   scanFileList,
 } from './services/folderScanner';
+import { cacheBlobToNativeServer, isNativeAndroid } from './services/nativeMedia';
 import {
   buildInitialSamples,
   deleteUploadedVideo,
@@ -106,22 +107,47 @@ export function App() {
 
       if (cancelled) return;
 
-      const uploadedShorts: ShortVideoItem[] = uploadedList
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .map((item) => {
-          const url = URL.createObjectURL(item.blob);
-          objectUrlsRef.current.push(url);
+      const nativeAndroid = isNativeAndroid();
+      const sortedUploads = [...uploadedList].sort(
+        (a, b) => b.createdAt - a.createdAt,
+      );
+
+      const uploadedShorts: ShortVideoItem[] = await Promise.all(
+        sortedUploads.map(async (item) => {
+          let url = '';
+          let posterUrl: string | undefined;
+          let detectedDur = 0;
+
+          if (nativeAndroid) {
+            const nativeRes = await cacheBlobToNativeServer(
+              item.id,
+              item.blob,
+              item.blob.type || 'video/mp4',
+            );
+            if (nativeRes?.url) {
+              url = nativeRes.url;
+              posterUrl = nativeRes.thumbUrl;
+              detectedDur = nativeRes.duration ?? 0;
+            }
+          }
+
+          if (!url) {
+            url = URL.createObjectURL(item.blob);
+            objectUrlsRef.current.push(url);
+          }
+
           const saved = metaMap[item.id];
           return {
             id: item.id,
-            sourceType: 'uploaded',
+            sourceType: 'uploaded' as const,
             title: saved?.title || item.title,
             description: saved?.description ?? item.description,
             fileName: item.fileName,
             relativePath: 'Studio Lokal',
             fileSize: item.fileSize,
-            duration: saved?.duration ?? item.duration,
+            duration: saved?.duration || item.duration || detectedDur,
             videoUrl: url,
+            posterUrl,
             sourceBlob: item.blob,
             createdAt: item.createdAt,
             likesCount: saved?.likesCount ?? 0,
@@ -136,7 +162,8 @@ export function App() {
             creatorAvatar: loadedProfile.avatarDataUrl,
             isOwnVideo: true,
           };
-        });
+        }),
+      );
 
       const sampleShorts = buildInitialSamples(loadedProfile).map((sample) => {
         const saved = metaMap[sample.id];
@@ -623,8 +650,23 @@ export function App() {
       };
       await saveUploadedVideo(persisted);
 
-      const url = URL.createObjectURL(concreteBlob);
-      objectUrlsRef.current.push(url);
+      let url = '';
+      let posterUrl: string | undefined;
+      let nativeDur = 0;
+
+      if (isNativeAndroid()) {
+        const nativeRes = await cacheBlobToNativeServer(id, concreteBlob, mime);
+        if (nativeRes?.url) {
+          url = nativeRes.url;
+          posterUrl = nativeRes.thumbUrl;
+          nativeDur = nativeRes.duration ?? 0;
+        }
+      }
+
+      if (!url) {
+        url = URL.createObjectURL(concreteBlob);
+        objectUrlsRef.current.push(url);
+      }
 
       const newShort: ShortVideoItem = {
         id,
@@ -634,8 +676,9 @@ export function App() {
         fileName: payload.file.name,
         relativePath: 'Studio Lokal',
         fileSize: payload.file.size,
-        duration: payload.duration,
+        duration: payload.duration || nativeDur,
         videoUrl: url,
+        posterUrl,
         sourceFile: payload.file,
         sourceBlob: concreteBlob,
         createdAt: persisted.createdAt,
