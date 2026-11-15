@@ -35,13 +35,25 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Configure Android storage and media permissions
+      - name: Install native Android media server plugin and permissions
         run: |
+          JAVA_DIR="android/app/src/main/java/com/kilas/offlineshorts"
+          mkdir -p "$JAVA_DIR"
+          cp android-native/LocalMediaServer.java "$JAVA_DIR/LocalMediaServer.java"
+          cp android-native/KilasMediaPlugin.java "$JAVA_DIR/KilasMediaPlugin.java"
+          cp android-native/MainActivity.java "$JAVA_DIR/MainActivity.java"
+
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           node -e '
             const fs = require("fs");
             const file = process.argv[1];
             let xml = fs.readFileSync(file, "utf8");
+            if (!xml.includes("android:usesCleartextTraffic")) {
+              xml = xml.replace(
+                "<application",
+                "<application\n        android:usesCleartextTraffic=\"true\""
+              );
+            }
             const perms = [
               "android.permission.READ_MEDIA_VIDEO",
               "android.permission.READ_MEDIA_IMAGES",
