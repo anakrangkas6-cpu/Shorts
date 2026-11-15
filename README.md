@@ -57,6 +57,13 @@ Lingkungan web tidak menjalankan kompilator Java/Gradle secara langsung, sehingg
 3. Workflow **Deploy to GitHub Pages** (`.github/workflows/deploy-pages.yml`) akan membangun aplikasi dan menerbitkannya di `https://<username>.github.io/<nama-repo>/`.
 4. Kamu juga bisa menekan tombol **Pasang Aplikasi** di dalam aplikasi (atau *Add to Home Screen* di Android/iOS) untuk memasangnya sebagai aplikasi mandiri (*PWA*) offline.
 
+## Catatan kompatibilitas Android
+
+- APK ini membungkus aplikasi React melalui Capacitor. Video yang ditambahkan melalui Studio Lokal disimpan di IndexedDB aplikasi dan dapat diputar tanpa internet setelah tersimpan.
+- Pemindaian folder memakai File System Access API atau pemilih folder `webkitdirectory`. Dukungan pemilih folder berbeda antarversi Android WebView/perangkat; jika pemilih folder tidak tersedia, gunakan fitur tambah video satu per satu di Studio Lokal.
+- Folder eksternal tidak dipantau otomatis di latar belakang. Jika izin folder kedaluwarsa, pilih kembali folder melalui tombol Hubungkan Ulang Folder.
+- Format yang paling kompatibel untuk pemutaran Android adalah MP4 dengan video H.264 dan audio AAC. Format/codec lain bergantung pada decoder perangkat.
+
 ## Menjalankan Secara Lokal
 
 ```bash
