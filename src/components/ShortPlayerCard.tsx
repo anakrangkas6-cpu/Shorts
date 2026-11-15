@@ -5,18 +5,21 @@ import {
   MessageSquareText,
   Pause,
   Play,
+  RotateCcw,
   Shrink,
   SlidersHorizontal,
   ThumbsUp,
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { materializeFileToBlobUrl } from '../services/folderScanner';
 import { ShortVideoItem } from '../types/shorts';
 import {
   buildCssFilter,
   formatCompactCount,
   formatDuration,
   getPresetLabel,
+  TRANSPARENT_POSTER,
 } from '../utils/effects';
 import { ProceduralCanvasReel } from './ProceduralCanvasReel';
 import { VideoEffectOverlays } from './VideoEffectOverlays';
@@ -56,9 +59,13 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const tapTimerRef = useRef<number | null>(null);
   const lastTapRef = useRef<number>(0);
+  const hasMaterializedRetry = useRef(false);
+  const generatedBlobUrlRef = useRef<string | null>(null);
 
+  const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(video.videoUrl);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -70,6 +77,51 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
   const [hearts, setHearts] = useState<HeartBurst[]>([]);
 
   const cssFilter = useMemo(() => buildCssFilter(video.effect), [video.effect]);
+
+  useEffect(() => {
+    setResolvedUrl(video.videoUrl);
+    setVideoError(null);
+    hasMaterializedRetry.current = false;
+  }, [video.videoUrl, video.id]);
+
+  useEffect(() => {
+    return () => {
+      if (generatedBlobUrlRef.current) {
+        URL.revokeObjectURL(generatedBlobUrlRef.current);
+        generatedBlobUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  const attemptPlay = useCallback(
+    (el: HTMLVideoElement) => {
+      el.playbackRate = video.effect.playbackRate || 1;
+      el.muted = isMuted;
+      const playPromise = el.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            setVideoError(null);
+          })
+          .catch(() => {
+            el.muted = true;
+            if (!isMuted) {
+              onToggleMute();
+            }
+            el.play()
+              .then(() => {
+                setIsPlaying(true);
+                setVideoError(null);
+              })
+              .catch(() => {
+                setIsPlaying(false);
+              });
+          });
+      }
+    },
+    [video.effect.playbackRate, isMuted, onToggleMute],
+  );
 
   // Sync play/pause when active slide changes
   useEffect(() => {
@@ -91,33 +143,14 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
       return;
     }
 
-    if (!el) return;
-    el.playbackRate = video.effect.playbackRate || 1;
-    el.muted = isMuted;
-
+    if (!el || !resolvedUrl) return;
     if (!userPaused) {
-      const playPromise = el.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            setIsPlaying(true);
-          })
-          .catch(() => {
-            // Autoplay with sound might be blocked before interaction; mute and retry
-            el.muted = true;
-            if (!isMuted) {
-              onToggleMute();
-            }
-            el.play()
-              .then(() => setIsPlaying(true))
-              .catch(() => setIsPlaying(false));
-          });
-      }
+      attemptPlay(el);
     } else {
       el.pause();
       setIsPlaying(false);
     }
-  }, [isActive, userPaused, video.sourceType, video.effect.playbackRate, isMuted, onToggleMute]);
+  }, [isActive, userPaused, video.sourceType, resolvedUrl, attemptPlay]);
 
   // Keep muted & playbackRate synced dynamically
   useEffect(() => {
@@ -134,34 +167,61 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
     }, 520);
   }, []);
 
-  const togglePlayPause = useCallback(() => {
-    if (video.sourceType === 'sample') {
-      setUserPaused((prev) => {
-        const nextPaused = !prev;
-        setIsPlaying(!nextPaused);
-        showTransientFeedback(nextPaused ? 'pause' : 'play');
-        return nextPaused;
-      });
-      return;
-    }
+  const togglePlayPause = useCallback(
+    (forcePlay = false) => {
+      if (video.sourceType === 'sample') {
+        setUserPaused((prev) => {
+          const nextPaused = forcePlay ? false : !prev;
+          setIsPlaying(!nextPaused);
+          if (!forcePlay) {
+            showTransientFeedback(nextPaused ? 'pause' : 'play');
+          }
+          return nextPaused;
+        });
+        return;
+      }
 
-    const el = videoRef.current;
-    if (!el) return;
-    if (el.paused) {
-      setUserPaused(false);
-      el.play()
-        .then(() => {
-          setIsPlaying(true);
+      const el = videoRef.current;
+      if (!el) return;
+      if (el.paused || forcePlay) {
+        setUserPaused(false);
+        attemptPlay(el);
+        if (!forcePlay) {
           showTransientFeedback('play');
-        })
-        .catch(() => {});
-    } else {
-      setUserPaused(true);
-      el.pause();
-      setIsPlaying(false);
-      showTransientFeedback('pause');
+        }
+      } else {
+        setUserPaused(true);
+        el.pause();
+        setIsPlaying(false);
+        showTransientFeedback('pause');
+      }
+    },
+    [video.sourceType, attemptPlay, showTransientFeedback],
+  );
+
+  const handleVideoLoadError = useCallback(async () => {
+    if (!hasMaterializedRetry.current && video.sourceFile) {
+      hasMaterializedRetry.current = true;
+      setIsBuffering(true);
+      try {
+        const freshUrl = await materializeFileToBlobUrl(video.sourceFile);
+        if (generatedBlobUrlRef.current) {
+          URL.revokeObjectURL(generatedBlobUrlRef.current);
+        }
+        generatedBlobUrlRef.current = freshUrl;
+        setResolvedUrl(freshUrl);
+        setVideoError(null);
+        setIsBuffering(false);
+        return;
+      } catch {
+        setIsBuffering(false);
+      }
     }
-  }, [video.sourceType, showTransientFeedback]);
+    setIsPlaying(false);
+    setVideoError(
+      'Video tidak dapat didekode oleh pemutar perangkat. Pastikan format MP4 (H.264) atau izinkan akses berkas.',
+    );
+  }, [video.sourceFile]);
 
   const spawnHeart = useCallback((clientX: number, clientY: number) => {
     const rect = frameRef.current?.getBoundingClientRect();
@@ -185,18 +245,12 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
     const delta = now - lastTapRef.current;
     lastTapRef.current = now;
 
-    if (delta < 260) {
-      if (tapTimerRef.current) {
-        window.clearTimeout(tapTimerRef.current);
-        tapTimerRef.current = null;
-      }
+    if (delta < 280) {
       spawnHeart(e.clientX, e.clientY);
       onToggleLike(video.id, true);
+      togglePlayPause(true);
     } else {
-      tapTimerRef.current = window.setTimeout(() => {
-        togglePlayPause();
-        tapTimerRef.current = null;
-      }, 240);
+      togglePlayPause();
     }
   };
 
@@ -243,10 +297,12 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
               duration={duration}
               onTimeUpdate={setCurrentTime}
             />
-          ) : video.videoUrl ? (
+          ) : resolvedUrl && !videoError ? (
             <video
               ref={videoRef}
-              src={video.videoUrl}
+              src={resolvedUrl}
+              poster={TRANSPARENT_POSTER}
+              autoPlay={isActive}
               playsInline
               loop
               muted={isMuted}
@@ -261,6 +317,20 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
                   onDurationDetected?.(video.id, dur);
                 }
               }}
+              onCanPlay={() => {
+                setIsBuffering(false);
+                if (isActive && !userPaused && videoRef.current?.paused) {
+                  attemptPlay(videoRef.current);
+                }
+              }}
+              onPlaying={() => {
+                setIsPlaying(true);
+                setIsBuffering(false);
+                setVideoError(null);
+              }}
+              onPause={() => setIsPlaying(false)}
+              onWaiting={() => setIsBuffering(true)}
+              onError={handleVideoLoadError}
               onTimeUpdate={(e) => {
                 if (!isScrubbing) {
                   setCurrentTime(e.currentTarget.currentTime);
@@ -269,12 +339,28 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
             />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center bg-zinc-900 px-6 text-center text-zinc-400">
-              <p className="text-sm font-medium text-zinc-200">
-                Video tidak tersedia sementara
+              <p className="text-sm font-semibold text-zinc-200">
+                {videoError ? 'Gagal memutar video' : 'Video tidak tersedia sementara'}
               </p>
-              <p className="mt-1 text-xs text-zinc-400">
-                Hubungkan ulang folder pribadi untuk memutar berkas ini.
+              <p className="mt-1.5 max-w-xs text-xs leading-relaxed text-zinc-400">
+                {videoError ||
+                  'Hubungkan ulang folder pribadi atau pilih berkas video dari perangkat.'}
               </p>
+              {video.sourceFile && (
+                <button
+                  type="button"
+                  data-interactive="true"
+                  onClick={() => {
+                    hasMaterializedRetry.current = false;
+                    setVideoError(null);
+                    void handleVideoLoadError();
+                  }}
+                  className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-white/15 px-4 text-xs font-semibold text-white transition hover:bg-white/25"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Coba Muat Ulang</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -327,8 +413,25 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
           </button>
         </div>
 
+        {/* Center Play Trigger when active & paused (preserves mobile user gesture) */}
+        {isActive && !isPlaying && !videoError && (
+          <button
+            type="button"
+            data-interactive="true"
+            onClick={() => togglePlayPause(true)}
+            aria-label="Putar video"
+            className="absolute left-1/2 top-1/2 z-20 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white shadow-xl backdrop-blur-md transition hover:scale-105 hover:bg-black/75 active:scale-95"
+          >
+            {isBuffering ? (
+              <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            ) : (
+              <Play className="ml-0.5 h-7 w-7 fill-white" />
+            )}
+          </button>
+        )}
+
         {/* Center Transient Play/Pause Feedback */}
-        {tapFeedback && (
+        {tapFeedback && isPlaying && (
           <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/60 p-4 text-white backdrop-blur-md">
             {tapFeedback === 'play' ? (
               <Play className="h-8 w-8 fill-white" />
