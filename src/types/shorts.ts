@@ -73,6 +73,7 @@ export interface ShortVideoItem {
   fileSize: number;
   duration: number;
   videoUrl?: string;
+  sourceFile?: File;
   sampleTheme?: 'aurora' | 'sunset' | 'kinetic';
   createdAt: number;
   likesCount: number;
