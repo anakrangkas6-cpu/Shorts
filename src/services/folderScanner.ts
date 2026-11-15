@@ -178,11 +178,27 @@ export function probeVideoDuration(url: string): Promise<number> {
   });
 }
 
-export async function materializeFileToBlobUrl(file: File): Promise<string> {
-  const mime = inferVideoMimeType(file);
+export async function materializeFileToBlobUrl(
+  file: Blob,
+): Promise<{ url: string; blob: Blob }> {
+  const mime =
+    file instanceof File
+      ? inferVideoMimeType(file)
+      : file.type && file.type.startsWith('video/')
+        ? file.type
+        : 'video/mp4';
   const buffer = await file.arrayBuffer();
   const concreteBlob = new Blob([buffer], { type: mime });
-  return URL.createObjectURL(concreteBlob);
+  return { url: URL.createObjectURL(concreteBlob), blob: concreteBlob };
+}
+
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error('FileReader error'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 const MAX_AUTO_MATERIALIZE_BYTES = 150 * 1024 * 1024;
@@ -199,13 +215,15 @@ export async function buildShortItemsFromLocalEntriesAsync(
       const saved = metaMap[id];
       const mime = inferVideoMimeType(file);
       let videoUrl = '';
+      let sourceBlob: Blob = file;
       try {
         if (file.size <= MAX_AUTO_MATERIALIZE_BYTES) {
           const buffer = await file.arrayBuffer();
-          videoUrl = URL.createObjectURL(new Blob([buffer], { type: mime }));
+          sourceBlob = new Blob([buffer], { type: mime });
+          videoUrl = URL.createObjectURL(sourceBlob);
         } else {
-          const typedBlob = file.type ? file : new Blob([file], { type: mime });
-          videoUrl = URL.createObjectURL(typedBlob);
+          sourceBlob = file.type ? file : new Blob([file], { type: mime });
+          videoUrl = URL.createObjectURL(sourceBlob);
         }
       } catch {
         videoUrl = URL.createObjectURL(file);
@@ -224,6 +242,7 @@ export async function buildShortItemsFromLocalEntriesAsync(
         duration: saved?.duration ?? 0,
         videoUrl,
         sourceFile: file,
+        sourceBlob,
         createdAt: file.lastModified || Date.now(),
         likesCount: saved?.likesCount ?? 0,
         likedByMe: saved?.likedByMe ?? false,
