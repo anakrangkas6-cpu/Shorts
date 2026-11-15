@@ -198,6 +198,31 @@ export function isSupportedVideoFile(file: File): boolean {
   return VIDEO_FILE_EXTENSIONS.has(ext);
 }
 
+export const TRANSPARENT_POSTER =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+export function inferVideoMimeType(file: File): string {
+  if (file.type && file.type.startsWith('video/')) {
+    return file.type;
+  }
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  switch (ext) {
+    case 'webm':
+      return 'video/webm';
+    case 'mov':
+      return 'video/quicktime';
+    case 'ogg':
+    case 'ogv':
+      return 'video/ogg';
+    case 'mkv':
+      return 'video/x-matroska';
+    case 'mp4':
+    case 'm4v':
+    default:
+      return 'video/mp4';
+  }
+}
+
 export function cleanFileTitle(fileName: string): string {
   return fileName
     .replace(/\.[^/.]+$/, '')
