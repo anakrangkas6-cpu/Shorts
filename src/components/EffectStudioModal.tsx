@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   Film,
+  Play,
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
@@ -14,6 +15,11 @@ import {
   materializeFileToBlobUrl,
 } from '../services/folderScanner';
 import {
+  cacheBlobToNativeServer,
+  isNativeAndroid,
+  openNativeAndroidPlayer,
+} from '../services/nativeMedia';
+import {
   ShortVideoItem,
   TextOverlayPosition,
   VideoEffectConfig,
@@ -25,9 +31,11 @@ import {
   EFFECT_OVERLAYS,
   EFFECT_PRESETS,
   formatFileSize,
+  inferVideoMimeType,
   isSupportedVideoFile,
   TRANSPARENT_POSTER,
 } from '../utils/effects';
+import { probeVideoCodec } from '../utils/mp4Probe';
 import { ProceduralCanvasReel } from './ProceduralCanvasReel';
 import { VideoEffectOverlays } from './VideoEffectOverlays';
 
@@ -133,11 +141,26 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
       URL.revokeObjectURL(previewUrl);
     }
     let url = '';
-    try {
-      const res = await materializeFileToBlobUrl(file);
-      url = res.url;
-    } catch {
-      url = URL.createObjectURL(file);
+    if (isNativeAndroid()) {
+      const nativeRes = await cacheBlobToNativeServer(
+        `studio_preview_${file.name}_${file.size}`,
+        file,
+        inferVideoMimeType(file),
+      );
+      if (nativeRes?.url) {
+        url = nativeRes.url;
+        if (nativeRes.duration) {
+          setDetectedDuration(nativeRes.duration);
+        }
+      }
+    }
+    if (!url) {
+      try {
+        const res = await materializeFileToBlobUrl(file);
+        url = res.url;
+      } catch {
+        url = URL.createObjectURL(file);
+      }
     }
     setSelectedFile(file);
     setPreviewUrl(url);
@@ -249,6 +272,7 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
                   onError={async () => {
                     if (
                       selectedFile &&
+                      !isNativeAndroid() &&
                       previewUrl.startsWith('blob:') &&
                       selectedFile.size <= 35 * 1024 * 1024
                     ) {
@@ -261,8 +285,17 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
                         // ignore
                       }
                     }
+                    const sourceBlob =
+                      selectedFile ??
+                      editingVideo?.sourceBlob ??
+                      editingVideo?.sourceFile;
+                    const probe = sourceBlob
+                      ? await probeVideoCodec(sourceBlob)
+                      : null;
                     setErrorMsg(
-                      'Pratinjau tidak dapat didekode oleh WebView perangkat (pastikan MP4 H.264).',
+                      probe
+                        ? `Pratinjau WebView tidak mendukung codec ${probe.codec} (${probe.container}). Kamu tetap bisa menyimpan atau putar dengan Pemutar Native Android.`
+                        : 'Pratinjau tidak dapat didekode oleh WebView perangkat.',
                     );
                   }}
                   style={{ filter: cssFilter }}
@@ -316,6 +349,23 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
                   </p>
                 )}
               </div>
+            )}
+
+            {isNativeAndroid() && previewUrl && errorMsg && (
+              <button
+                type="button"
+                onClick={() =>
+                  void openNativeAndroidPlayer({
+                    url: previewUrl,
+                    title: title || selectedFile?.name || 'Pratinjau Video',
+                    muted: false,
+                  })
+                }
+                className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-[#FF2D55] px-4 text-xs font-semibold text-white transition hover:bg-[#e6244a]"
+              >
+                <Play className="h-3.5 w-3.5 fill-white" />
+                <span>Pratinjau di Pemutar Android</span>
+              </button>
             )}
           </div>
 

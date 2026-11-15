@@ -16,6 +16,11 @@ import {
   blobToDataUrl,
   materializeFileToBlobUrl,
 } from '../services/folderScanner';
+import {
+  cacheBlobToNativeServer,
+  isNativeAndroid,
+  openNativeAndroidPlayer,
+} from '../services/nativeMedia';
 import { ShortVideoItem } from '../types/shorts';
 import {
   buildCssFilter,
@@ -23,8 +28,10 @@ import {
   formatDuration,
   formatFileSize,
   getPresetLabel,
+  inferVideoMimeType,
   TRANSPARENT_POSTER,
 } from '../utils/effects';
+import { probeVideoCodec } from '../utils/mp4Probe';
 import { ProceduralCanvasReel } from './ProceduralCanvasReel';
 import { VideoEffectOverlays } from './VideoEffectOverlays';
 
@@ -64,8 +71,11 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const lastTapRef = useRef<number>(0);
-  const recoveryTierRef = useRef<0 | 1 | 2>(0);
+  const recoveryTierRef = useRef<0 | 1 | 2 | 3>(0);
   const generatedBlobUrlRef = useRef<string | null>(null);
+  const lastMediaErrorRef = useRef<{ code?: number; message?: string } | null>(
+    null,
+  );
 
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(video.videoUrl);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -86,6 +96,7 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
     setResolvedUrl(video.videoUrl);
     setVideoError(null);
     recoveryTierRef.current = 0;
+    lastMediaErrorRef.current = null;
   }, [video.videoUrl, video.id]);
 
   useEffect(() => {
@@ -205,12 +216,49 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
 
   const handleVideoLoadError = useCallback(
     async (e?: React.SyntheticEvent<HTMLVideoElement>) => {
-      const mediaError = e?.currentTarget?.error;
+      const eventError = e?.currentTarget?.error ?? videoRef.current?.error;
+      if (eventError?.code) {
+        lastMediaErrorRef.current = {
+          code: eventError.code,
+          message: eventError.message,
+        };
+      }
+      const mediaError = lastMediaErrorRef.current;
       const blobSource = video.sourceBlob ?? video.sourceFile;
+      const mime =
+        blobSource instanceof File
+          ? inferVideoMimeType(blobSource)
+          : blobSource?.type || 'video/mp4';
 
-      // Tier 1: Re-materialize fresh typed Blob URL
-      if (recoveryTierRef.current < 1 && blobSource) {
+      // Tier 1 (Android APK): Stream via local 127.0.0.1 HTTP 206 Range server
+      if (
+        recoveryTierRef.current < 1 &&
+        isNativeAndroid() &&
+        blobSource &&
+        !(resolvedUrl || '').startsWith('http://127.0.0.1')
+      ) {
         recoveryTierRef.current = 1;
+        setIsBuffering(true);
+        const nativeRes = await cacheBlobToNativeServer(
+          video.id,
+          blobSource,
+          mime,
+        );
+        if (nativeRes?.url) {
+          if (nativeRes.duration) {
+            setDuration(nativeRes.duration);
+            onDurationDetected?.(video.id, nativeRes.duration);
+          }
+          setResolvedUrl(nativeRes.url);
+          setVideoError(null);
+          setIsBuffering(false);
+          return;
+        }
+      }
+
+      // Tier 2: Re-materialize fresh typed Blob URL
+      if (recoveryTierRef.current < 2 && blobSource) {
+        recoveryTierRef.current = 2;
         setIsBuffering(true);
         try {
           const { url: freshUrl } = await materializeFileToBlobUrl(blobSource);
@@ -223,17 +271,18 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
           setIsBuffering(false);
           return;
         } catch {
-          // continue to tier 2
+          // continue to tier 3
         }
       }
 
-      // Tier 2: Convert Blob <= 35MB to Data URL (bypasses Android WebView blob: restrictions)
+      // Tier 3 (Web fallback): Convert smaller Blob <= 25MB to Data URL
       if (
-        recoveryTierRef.current < 2 &&
+        recoveryTierRef.current < 3 &&
+        !isNativeAndroid() &&
         blobSource &&
-        blobSource.size <= 35 * 1024 * 1024
+        blobSource.size <= 25 * 1024 * 1024
       ) {
-        recoveryTierRef.current = 2;
+        recoveryTierRef.current = 3;
         setIsBuffering(true);
         try {
           const dataUrl = await blobToDataUrl(blobSource);
@@ -248,16 +297,67 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
 
       setIsBuffering(false);
       setIsPlaying(false);
-      const codeLabel = mediaError?.code ? `Kode ${mediaError.code}` : 'Kode tidak diketahui';
-      const detail = mediaError?.message ? ` (${mediaError.message})` : '';
-      const mimeInfo = blobSource?.type || 'video/mp4';
+      const probe = blobSource ? await probeVideoCodec(blobSource) : null;
+      const codeLabel = mediaError?.code
+        ? `Kode ${mediaError.code}`
+        : 'Format/Codec tidak didukung WebView';
+      const codecDetail = probe
+        ? `${probe.container} · ${probe.codec}`
+        : mime;
       const sizeInfo = formatFileSize(video.fileSize || blobSource?.size || 0);
-      setVideoError(
-        `Pemutar WebView tidak dapat mendekode video ini [${codeLabel}${detail} · ${mimeInfo} · ${sizeInfo}]. Coba video MP4 H.264.`,
-      );
+      if (probe?.isHevc && isNativeAndroid()) {
+        setVideoError(
+          `Video memakai codec ${probe.codec} yang tidak didukung WebView browser [${sizeInfo}]. Gunakan Pemutar Native Android di bawah.`,
+        );
+      } else {
+        setVideoError(
+          `Pemutar WebView tidak dapat mendekode video ini [${codeLabel} · ${codecDetail} · ${sizeInfo}].`,
+        );
+      }
     },
-    [video.sourceBlob, video.sourceFile, video.fileSize],
+    [
+      video.id,
+      video.sourceBlob,
+      video.sourceFile,
+      video.fileSize,
+      resolvedUrl,
+      onDurationDetected,
+    ],
   );
+
+  const handleOpenNativeFallback = useCallback(async () => {
+    const blobSource = video.sourceBlob ?? video.sourceFile;
+    let targetUrl = resolvedUrl || '';
+    if (blobSource && !targetUrl.startsWith('http://127.0.0.1')) {
+      const mime =
+        blobSource instanceof File
+          ? inferVideoMimeType(blobSource)
+          : blobSource.type || 'video/mp4';
+      const nativeRes = await cacheBlobToNativeServer(
+        video.id,
+        blobSource,
+        mime,
+      );
+      if (nativeRes?.url) {
+        targetUrl = nativeRes.url;
+        setResolvedUrl(nativeRes.url);
+      }
+    }
+    if (targetUrl) {
+      await openNativeAndroidPlayer({
+        url: targetUrl,
+        title: video.title,
+        muted: isMuted,
+      });
+    }
+  }, [
+    video.id,
+    video.sourceBlob,
+    video.sourceFile,
+    video.title,
+    resolvedUrl,
+    isMuted,
+  ]);
 
   const spawnHeart = useCallback((clientX: number, clientY: number) => {
     const rect = frameRef.current?.getBoundingClientRect();
@@ -385,21 +485,35 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
                 {videoError ||
                   'Hubungkan ulang folder pribadi atau pilih berkas video dari perangkat.'}
               </p>
-              {(video.sourceBlob || video.sourceFile) && (
-                <button
-                  type="button"
-                  data-interactive="true"
-                  onClick={() => {
-                    recoveryTierRef.current = 0;
-                    setVideoError(null);
-                    void handleVideoLoadError();
-                  }}
-                  className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-white/15 px-4 text-xs font-semibold text-white transition hover:bg-white/25"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  <span>Coba Muat Ulang</span>
-                </button>
-              )}
+              <div className="mt-4 flex flex-col items-center gap-2.5">
+                {isNativeAndroid() && (video.sourceBlob || video.sourceFile || resolvedUrl) && (
+                  <button
+                    type="button"
+                    data-interactive="true"
+                    onClick={() => void handleOpenNativeFallback()}
+                    className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#FF2D55] px-5 text-xs font-semibold text-white shadow-lg shadow-[#FF2D55]/30 transition hover:bg-[#e6244a] active:scale-95"
+                  >
+                    <Play className="h-3.5 w-3.5 fill-white" />
+                    <span>Putar dengan Pemutar Android</span>
+                  </button>
+                )}
+
+                {(video.sourceBlob || video.sourceFile) && (
+                  <button
+                    type="button"
+                    data-interactive="true"
+                    onClick={() => {
+                      recoveryTierRef.current = 0;
+                      setVideoError(null);
+                      void handleVideoLoadError();
+                    }}
+                    className="inline-flex h-10 items-center gap-2 rounded-xl bg-white/15 px-4 text-xs font-semibold text-white transition hover:bg-white/25"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Coba Muat Ulang</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

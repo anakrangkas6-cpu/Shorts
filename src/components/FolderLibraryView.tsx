@@ -316,7 +316,19 @@ export const FolderLibraryView: React.FC<FolderLibraryViewProps> = ({
                   onClick={() => onSelectVideo(item.id)}
                   className="relative aspect-[9/16] w-full overflow-hidden bg-black text-left focus-visible:outline-2 focus-visible:outline-[#FF2D55]"
                 >
-                  {item.videoUrl ? (
+                  {item.posterUrl ? (
+                    <>
+                      <img
+                        src={item.posterUrl}
+                        alt={item.title}
+                        style={{ filter: buildCssFilter(item.effect) }}
+                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                      />
+                      <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition group-hover:scale-110">
+                        <Play className="ml-0.5 h-5 w-5 fill-white" />
+                      </span>
+                    </>
+                  ) : item.videoUrl ? (
                     <>
                       <video
                         src={item.videoUrl}
