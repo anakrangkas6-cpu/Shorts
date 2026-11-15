@@ -1,0 +1,216 @@
+import { ShortVideoItem, StoredVideoMeta, UserProfile } from '../types/shorts';
+import {
+  cleanFileTitle,
+  DEFAULT_EFFECT_CONFIG,
+  isSupportedVideoFile,
+} from '../utils/effects';
+
+export interface LocalFileEntry {
+  file: File;
+  relativePath: string;
+}
+
+async function readDirectoryHandleRecursively(
+  dirHandle: FileSystemDirectoryHandle,
+  prefix = '',
+): Promise<LocalFileEntry[]> {
+  const entries: LocalFileEntry[] = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    const currentPath = prefix ? `${prefix}/${name}` : name;
+    if (handle.kind === 'file') {
+      const fileHandle = handle as FileSystemFileHandle;
+      const file = await fileHandle.getFile();
+      if (isSupportedVideoFile(file)) {
+        entries.push({ file, relativePath: currentPath });
+      }
+    } else if (handle.kind === 'directory') {
+      const subEntries = await readDirectoryHandleRecursively(
+        handle as FileSystemDirectoryHandle,
+        currentPath,
+      );
+      entries.push(...subEntries);
+    }
+  }
+  return entries;
+}
+
+export async function verifyDirectoryPermission(
+  handle: FileSystemDirectoryHandle,
+): Promise<boolean> {
+  try {
+    // @ts-expect-error queryPermission exists in File System Access API
+    const current = await handle.queryPermission({ mode: 'read' });
+    if (current === 'granted') return true;
+    // @ts-expect-error requestPermission exists in File System Access API
+    const requested = await handle.requestPermission({ mode: 'read' });
+    return requested === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+export async function scanDirectoryHandle(
+  handle: FileSystemDirectoryHandle,
+): Promise<LocalFileEntry[]> {
+  const granted = await verifyDirectoryPermission(handle);
+  if (!granted) {
+    throw new Error('Izin akses folder ditolak atau belum diberikan.');
+  }
+  const files = await readDirectoryHandleRecursively(handle);
+  files.sort((a, b) => b.file.lastModified - a.file.lastModified);
+  return files;
+}
+
+export function scanFileList(fileList: FileList | File[]): LocalFileEntry[] {
+  const entries: LocalFileEntry[] = [];
+  const arr = Array.from(fileList);
+  for (const file of arr) {
+    if (isSupportedVideoFile(file)) {
+      const rel =
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+        file.name;
+      entries.push({ file, relativePath: rel });
+    }
+  }
+  entries.sort((a, b) => b.file.lastModified - a.file.lastModified);
+  return entries;
+}
+
+async function readWebkitEntryRecursively(
+  entry: FileSystemEntry,
+  prefix = '',
+): Promise<LocalFileEntry[]> {
+  if (entry.isFile) {
+    const fileEntry = entry as FileSystemFileEntry;
+    return new Promise((resolve) => {
+      fileEntry.file(
+        (file) => {
+          const rel = prefix ? `${prefix}/${file.name}` : file.name;
+          if (isSupportedVideoFile(file)) {
+            resolve([{ file, relativePath: rel }]);
+          } else {
+            resolve([]);
+          }
+        },
+        () => resolve([]),
+      );
+    });
+  }
+  if (entry.isDirectory) {
+    const dirEntry = entry as FileSystemDirectoryEntry;
+    const reader = dirEntry.createReader();
+    const allEntries: FileSystemEntry[] = [];
+
+    const readBatch = (): Promise<FileSystemEntry[]> =>
+      new Promise((resolve) => {
+        reader.readEntries(
+          (batch) => resolve(batch),
+          () => resolve([]),
+        );
+      });
+
+    let batch = await readBatch();
+    while (batch.length > 0) {
+      allEntries.push(...batch);
+      batch = await readBatch();
+    }
+
+    const nextPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const nested = await Promise.all(
+      allEntries.map((child) => readWebkitEntryRecursively(child, nextPrefix)),
+    );
+    return nested.flat();
+  }
+  return [];
+}
+
+export async function scanDroppedItems(
+  dataTransfer: DataTransfer,
+): Promise<LocalFileEntry[]> {
+  const items = Array.from(dataTransfer.items || []);
+  const entries: LocalFileEntry[] = [];
+
+  const webkitEntries = items
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter((entry): entry is FileSystemEntry => Boolean(entry));
+
+  if (webkitEntries.length > 0) {
+    const results = await Promise.all(
+      webkitEntries.map((entry) => readWebkitEntryRecursively(entry)),
+    );
+    entries.push(...results.flat());
+  } else if (dataTransfer.files?.length) {
+    entries.push(...scanFileList(dataTransfer.files));
+  }
+
+  entries.sort((a, b) => b.file.lastModified - a.file.lastModified);
+  return entries;
+}
+
+export function probeVideoDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      resolve(0);
+    }, 3500);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.src = '';
+    };
+
+    video.onloadedmetadata = () => {
+      const dur = Number.isFinite(video.duration) ? video.duration : 0;
+      cleanup();
+      resolve(dur);
+    };
+    video.onerror = () => {
+      cleanup();
+      resolve(0);
+    };
+    video.src = url;
+  });
+}
+
+export function buildShortItemsFromLocalEntries(
+  entries: LocalFileEntry[],
+  metaMap: Record<string, StoredVideoMeta>,
+  profile: UserProfile,
+  folderName: string,
+): ShortVideoItem[] {
+  return entries.map(({ file, relativePath }) => {
+    const id = `folder:${relativePath}:${file.size}`;
+    const saved = metaMap[id];
+    const videoUrl = URL.createObjectURL(file);
+    return {
+      id,
+      sourceType: 'folder',
+      title: saved?.title || cleanFileTitle(file.name) || 'Video Pribadi',
+      description:
+        saved?.description ||
+        `Sumber lokal dari ${folderName} (${relativePath})`,
+      fileName: file.name,
+      relativePath,
+      fileSize: file.size,
+      duration: saved?.duration ?? 0,
+      videoUrl,
+      createdAt: file.lastModified || Date.now(),
+      likesCount: saved?.likesCount ?? 0,
+      likedByMe: saved?.likedByMe ?? false,
+      bookmarkedByMe: saved?.bookmarkedByMe ?? false,
+      comments: saved?.comments ?? [],
+      effect: saved?.effect
+        ? { ...DEFAULT_EFFECT_CONFIG, ...saved.effect }
+        : { ...DEFAULT_EFFECT_CONFIG },
+      creatorName: profile.name,
+      creatorHandle: profile.handle,
+      creatorAvatar: profile.avatarDataUrl,
+      isOwnVideo: true,
+    };
+  });
+}
