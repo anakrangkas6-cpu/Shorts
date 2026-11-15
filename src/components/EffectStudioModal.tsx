@@ -9,6 +9,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import { materializeFileToBlobUrl } from '../services/folderScanner';
 import {
   ShortVideoItem,
   TextOverlayPosition,
@@ -22,6 +23,7 @@ import {
   EFFECT_PRESETS,
   formatFileSize,
   isSupportedVideoFile,
+  TRANSPARENT_POSTER,
 } from '../utils/effects';
 import { ProceduralCanvasReel } from './ProceduralCanvasReel';
 import { VideoEffectOverlays } from './VideoEffectOverlays';
@@ -119,7 +121,7 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handlePickedFile = (file: File) => {
+  const handlePickedFile = async (file: File) => {
     if (!isSupportedVideoFile(file)) {
       setErrorMsg('Pilih berkas video yang didukung (MP4, WebM, MOV, M4V).');
       return;
@@ -127,7 +129,12 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
     if (previewUrl.startsWith('blob:')) {
       URL.revokeObjectURL(previewUrl);
     }
-    const url = URL.createObjectURL(file);
+    let url = '';
+    try {
+      url = await materializeFileToBlobUrl(file);
+    } catch {
+      url = URL.createObjectURL(file);
+    }
     setSelectedFile(file);
     setPreviewUrl(url);
     setTitle((prev) => prev.trim() || cleanFileTitle(file.name) || 'Video Baru');
@@ -224,6 +231,7 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
                 <video
                   ref={previewVideoRef}
                   src={previewUrl}
+                  poster={TRANSPARENT_POSTER}
                   autoPlay
                   loop
                   muted

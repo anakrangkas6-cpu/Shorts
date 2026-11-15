@@ -21,6 +21,7 @@ import {
   formatDuration,
   formatFileSize,
   getPresetLabel,
+  TRANSPARENT_POSTER,
 } from '../utils/effects';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -62,6 +63,7 @@ export const FolderLibraryView: React.FC<FolderLibraryViewProps> = ({
   onDeleteUploadedVideo,
 }) => {
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const multiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isDragging, setIsDragging] = useState(false);
 
@@ -229,6 +231,27 @@ export const FolderLibraryView: React.FC<FolderLibraryViewProps> = ({
             >
               <span>Telusuri Direktori</span>
             </button>
+
+            <input
+              ref={multiFileInputRef}
+              type="file"
+              multiple
+              accept="video/*"
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  onFallbackFolderSelected(e.target.files);
+                }
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => multiFileInputRef.current?.click()}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-zinc-900 px-3.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800"
+            >
+              <span>Pilih File Video</span>
+            </button>
           </div>
         </section>
 
@@ -294,14 +317,20 @@ export const FolderLibraryView: React.FC<FolderLibraryViewProps> = ({
                   className="relative aspect-[9/16] w-full overflow-hidden bg-black text-left focus-visible:outline-2 focus-visible:outline-[#FF2D55]"
                 >
                   {item.videoUrl ? (
-                    <video
-                      src={item.videoUrl}
-                      muted
-                      playsInline
-                      preload="metadata"
-                      style={{ filter: buildCssFilter(item.effect) }}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                    />
+                    <>
+                      <video
+                        src={item.videoUrl}
+                        poster={TRANSPARENT_POSTER}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        style={{ filter: buildCssFilter(item.effect) }}
+                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                      />
+                      <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition group-hover:scale-110">
+                        <Play className="ml-0.5 h-5 w-5 fill-white" />
+                      </span>
+                    </>
                   ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-950 p-4 text-center">
                       <Play className="h-8 w-8 text-white/80" />
