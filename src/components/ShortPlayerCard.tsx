@@ -12,12 +12,16 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { materializeFileToBlobUrl } from '../services/folderScanner';
+import {
+  blobToDataUrl,
+  materializeFileToBlobUrl,
+} from '../services/folderScanner';
 import { ShortVideoItem } from '../types/shorts';
 import {
   buildCssFilter,
   formatCompactCount,
   formatDuration,
+  formatFileSize,
   getPresetLabel,
   TRANSPARENT_POSTER,
 } from '../utils/effects';
@@ -60,7 +64,7 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const lastTapRef = useRef<number>(0);
-  const hasMaterializedRetry = useRef(false);
+  const recoveryTierRef = useRef<0 | 1 | 2>(0);
   const generatedBlobUrlRef = useRef<string | null>(null);
 
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(video.videoUrl);
@@ -81,7 +85,7 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
   useEffect(() => {
     setResolvedUrl(video.videoUrl);
     setVideoError(null);
-    hasMaterializedRetry.current = false;
+    recoveryTierRef.current = 0;
   }, [video.videoUrl, video.id]);
 
   useEffect(() => {
@@ -199,29 +203,61 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
     [video.sourceType, attemptPlay, showTransientFeedback],
   );
 
-  const handleVideoLoadError = useCallback(async () => {
-    if (!hasMaterializedRetry.current && video.sourceFile) {
-      hasMaterializedRetry.current = true;
-      setIsBuffering(true);
-      try {
-        const freshUrl = await materializeFileToBlobUrl(video.sourceFile);
-        if (generatedBlobUrlRef.current) {
-          URL.revokeObjectURL(generatedBlobUrlRef.current);
+  const handleVideoLoadError = useCallback(
+    async (e?: React.SyntheticEvent<HTMLVideoElement>) => {
+      const mediaError = e?.currentTarget?.error;
+      const blobSource = video.sourceBlob ?? video.sourceFile;
+
+      // Tier 1: Re-materialize fresh typed Blob URL
+      if (recoveryTierRef.current < 1 && blobSource) {
+        recoveryTierRef.current = 1;
+        setIsBuffering(true);
+        try {
+          const { url: freshUrl } = await materializeFileToBlobUrl(blobSource);
+          if (generatedBlobUrlRef.current) {
+            URL.revokeObjectURL(generatedBlobUrlRef.current);
+          }
+          generatedBlobUrlRef.current = freshUrl;
+          setResolvedUrl(freshUrl);
+          setVideoError(null);
+          setIsBuffering(false);
+          return;
+        } catch {
+          // continue to tier 2
         }
-        generatedBlobUrlRef.current = freshUrl;
-        setResolvedUrl(freshUrl);
-        setVideoError(null);
-        setIsBuffering(false);
-        return;
-      } catch {
-        setIsBuffering(false);
       }
-    }
-    setIsPlaying(false);
-    setVideoError(
-      'Video tidak dapat didekode oleh pemutar perangkat. Pastikan format MP4 (H.264) atau izinkan akses berkas.',
-    );
-  }, [video.sourceFile]);
+
+      // Tier 2: Convert Blob <= 35MB to Data URL (bypasses Android WebView blob: restrictions)
+      if (
+        recoveryTierRef.current < 2 &&
+        blobSource &&
+        blobSource.size <= 35 * 1024 * 1024
+      ) {
+        recoveryTierRef.current = 2;
+        setIsBuffering(true);
+        try {
+          const dataUrl = await blobToDataUrl(blobSource);
+          setResolvedUrl(dataUrl);
+          setVideoError(null);
+          setIsBuffering(false);
+          return;
+        } catch {
+          setIsBuffering(false);
+        }
+      }
+
+      setIsBuffering(false);
+      setIsPlaying(false);
+      const codeLabel = mediaError?.code ? `Kode ${mediaError.code}` : 'Kode tidak diketahui';
+      const detail = mediaError?.message ? ` (${mediaError.message})` : '';
+      const mimeInfo = blobSource?.type || 'video/mp4';
+      const sizeInfo = formatFileSize(video.fileSize || blobSource?.size || 0);
+      setVideoError(
+        `Pemutar WebView tidak dapat mendekode video ini [${codeLabel}${detail} · ${mimeInfo} · ${sizeInfo}]. Coba video MP4 H.264.`,
+      );
+    },
+    [video.sourceBlob, video.sourceFile, video.fileSize],
+  );
 
   const spawnHeart = useCallback((clientX: number, clientY: number) => {
     const rect = frameRef.current?.getBoundingClientRect();
@@ -297,8 +333,11 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
               duration={duration}
               onTimeUpdate={setCurrentTime}
             />
+          ) : !isActive && !isAdjacent ? (
+            <div className="h-full w-full bg-zinc-950" />
           ) : resolvedUrl && !videoError ? (
             <video
+              key={resolvedUrl}
               ref={videoRef}
               src={resolvedUrl}
               poster={TRANSPARENT_POSTER}
@@ -306,7 +345,7 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
               playsInline
               loop
               muted={isMuted}
-              preload={isActive || isAdjacent ? 'auto' : 'metadata'}
+              preload={isActive ? 'auto' : 'metadata'}
               className={`h-full w-full transition-[object-fit] duration-150 ${
                 fitContain ? 'object-contain' : 'object-cover'
               }`}
@@ -346,12 +385,12 @@ export const ShortPlayerCard: React.FC<ShortPlayerCardProps> = ({
                 {videoError ||
                   'Hubungkan ulang folder pribadi atau pilih berkas video dari perangkat.'}
               </p>
-              {video.sourceFile && (
+              {(video.sourceBlob || video.sourceFile) && (
                 <button
                   type="button"
                   data-interactive="true"
                   onClick={() => {
-                    hasMaterializedRetry.current = false;
+                    recoveryTierRef.current = 0;
                     setVideoError(null);
                     void handleVideoLoadError();
                   }}

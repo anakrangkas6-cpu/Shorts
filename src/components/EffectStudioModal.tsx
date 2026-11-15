@@ -9,7 +9,10 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { materializeFileToBlobUrl } from '../services/folderScanner';
+import {
+  blobToDataUrl,
+  materializeFileToBlobUrl,
+} from '../services/folderScanner';
 import {
   ShortVideoItem,
   TextOverlayPosition,
@@ -131,7 +134,8 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
     }
     let url = '';
     try {
-      url = await materializeFileToBlobUrl(file);
+      const res = await materializeFileToBlobUrl(file);
+      url = res.url;
     } catch {
       url = URL.createObjectURL(file);
     }
@@ -229,6 +233,7 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
                 </div>
               ) : previewUrl ? (
                 <video
+                  key={previewUrl}
                   ref={previewVideoRef}
                   src={previewUrl}
                   poster={TRANSPARENT_POSTER}
@@ -240,6 +245,25 @@ export const EffectStudioModal: React.FC<EffectStudioModalProps> = ({
                     if (Number.isFinite(e.currentTarget.duration)) {
                       setDetectedDuration(e.currentTarget.duration);
                     }
+                  }}
+                  onError={async () => {
+                    if (
+                      selectedFile &&
+                      previewUrl.startsWith('blob:') &&
+                      selectedFile.size <= 35 * 1024 * 1024
+                    ) {
+                      try {
+                        const dataUrl = await blobToDataUrl(selectedFile);
+                        URL.revokeObjectURL(previewUrl);
+                        setPreviewUrl(dataUrl);
+                        return;
+                      } catch {
+                        // ignore
+                      }
+                    }
+                    setErrorMsg(
+                      'Pratinjau tidak dapat didekode oleh WebView perangkat (pastikan MP4 H.264).',
+                    );
                   }}
                   style={{ filter: cssFilter }}
                   className="h-full w-full object-cover"
