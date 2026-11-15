@@ -2,6 +2,7 @@ import { ShortVideoItem, StoredVideoMeta, UserProfile } from '../types/shorts';
 import {
   cleanFileTitle,
   DEFAULT_EFFECT_CONFIG,
+  inferVideoMimeType,
   isSupportedVideoFile,
 } from '../utils/effects';
 
@@ -177,40 +178,65 @@ export function probeVideoDuration(url: string): Promise<number> {
   });
 }
 
-export function buildShortItemsFromLocalEntries(
+export async function materializeFileToBlobUrl(file: File): Promise<string> {
+  const mime = inferVideoMimeType(file);
+  const buffer = await file.arrayBuffer();
+  const concreteBlob = new Blob([buffer], { type: mime });
+  return URL.createObjectURL(concreteBlob);
+}
+
+const MAX_AUTO_MATERIALIZE_BYTES = 150 * 1024 * 1024;
+
+export async function buildShortItemsFromLocalEntriesAsync(
   entries: LocalFileEntry[],
   metaMap: Record<string, StoredVideoMeta>,
   profile: UserProfile,
   folderName: string,
-): ShortVideoItem[] {
-  return entries.map(({ file, relativePath }) => {
-    const id = `folder:${relativePath}:${file.size}`;
-    const saved = metaMap[id];
-    const videoUrl = URL.createObjectURL(file);
-    return {
-      id,
-      sourceType: 'folder',
-      title: saved?.title || cleanFileTitle(file.name) || 'Video Pribadi',
-      description:
-        saved?.description ||
-        `Sumber lokal dari ${folderName} (${relativePath})`,
-      fileName: file.name,
-      relativePath,
-      fileSize: file.size,
-      duration: saved?.duration ?? 0,
-      videoUrl,
-      createdAt: file.lastModified || Date.now(),
-      likesCount: saved?.likesCount ?? 0,
-      likedByMe: saved?.likedByMe ?? false,
-      bookmarkedByMe: saved?.bookmarkedByMe ?? false,
-      comments: saved?.comments ?? [],
-      effect: saved?.effect
-        ? { ...DEFAULT_EFFECT_CONFIG, ...saved.effect }
-        : { ...DEFAULT_EFFECT_CONFIG },
-      creatorName: profile.name,
-      creatorHandle: profile.handle,
-      creatorAvatar: profile.avatarDataUrl,
-      isOwnVideo: true,
-    };
-  });
+): Promise<ShortVideoItem[]> {
+  return Promise.all(
+    entries.map(async ({ file, relativePath }) => {
+      const id = `folder:${relativePath}:${file.size}`;
+      const saved = metaMap[id];
+      const mime = inferVideoMimeType(file);
+      let videoUrl = '';
+      try {
+        if (file.size <= MAX_AUTO_MATERIALIZE_BYTES) {
+          const buffer = await file.arrayBuffer();
+          videoUrl = URL.createObjectURL(new Blob([buffer], { type: mime }));
+        } else {
+          const typedBlob = file.type ? file : new Blob([file], { type: mime });
+          videoUrl = URL.createObjectURL(typedBlob);
+        }
+      } catch {
+        videoUrl = URL.createObjectURL(file);
+      }
+
+      return {
+        id,
+        sourceType: 'folder',
+        title: saved?.title || cleanFileTitle(file.name) || 'Video Pribadi',
+        description:
+          saved?.description ||
+          `Sumber lokal dari ${folderName} (${relativePath})`,
+        fileName: file.name,
+        relativePath,
+        fileSize: file.size,
+        duration: saved?.duration ?? 0,
+        videoUrl,
+        sourceFile: file,
+        createdAt: file.lastModified || Date.now(),
+        likesCount: saved?.likesCount ?? 0,
+        likedByMe: saved?.likedByMe ?? false,
+        bookmarkedByMe: saved?.bookmarkedByMe ?? false,
+        comments: saved?.comments ?? [],
+        effect: saved?.effect
+          ? { ...DEFAULT_EFFECT_CONFIG, ...saved.effect }
+          : { ...DEFAULT_EFFECT_CONFIG },
+        creatorName: profile.name,
+        creatorHandle: profile.handle,
+        creatorAvatar: profile.avatarDataUrl,
+        isOwnVideo: true,
+      };
+    }),
+  );
 }
