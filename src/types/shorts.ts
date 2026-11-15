@@ -73,7 +73,6 @@ export interface ShortVideoItem {
   fileSize: number;
   duration: number;
   videoUrl?: string;
-  posterUrl?: string;
   sourceFile?: File;
   sourceBlob?: Blob;
   sampleTheme?: 'aurora' | 'sunset' | 'kinetic';
