@@ -15,11 +15,11 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { ProfileModal } from './components/ProfileModal';
 import { ShortPlayerCard } from './components/ShortPlayerCard';
 import {
+  buildShortItemsFromLocalEntriesAsync,
+  LocalFileEntry,
   scanDirectoryHandle,
   scanDroppedItems,
   scanFileList,
-  buildShortItemsFromLocalEntries,
-  LocalFileEntry,
 } from './services/folderScanner';
 import {
   buildInitialSamples,
@@ -49,6 +49,7 @@ import {
   cleanFileTitle,
   DEFAULT_EFFECT_CONFIG,
   DEFAULT_USER_PROFILE,
+  inferVideoMimeType,
 } from './utils/effects';
 
 type ActiveSection = 'feed' | 'library' | 'liked';
@@ -183,7 +184,7 @@ export function App() {
       }
 
       const metaMap: Record<string, StoredVideoMeta> = await loadAllVideoMeta();
-      const folderShorts = buildShortItemsFromLocalEntries(
+      const folderShorts = await buildShortItemsFromLocalEntriesAsync(
         entries,
         metaMap,
         profile,
@@ -599,6 +600,15 @@ export function App() {
       duration: number;
     }) => {
       const id = `uploaded:${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const mime = inferVideoMimeType(payload.file);
+      let concreteBlob: Blob = payload.file;
+      try {
+        const buf = await payload.file.arrayBuffer();
+        concreteBlob = new Blob([buf], { type: mime });
+      } catch {
+        concreteBlob = payload.file;
+      }
+
       const persisted: PersistedUploadedVideo = {
         id,
         title: payload.title,
@@ -606,13 +616,13 @@ export function App() {
         fileName: payload.file.name,
         fileSize: payload.file.size,
         duration: payload.duration,
-        blob: payload.file,
+        blob: concreteBlob,
         createdAt: Date.now(),
         effect: payload.effect,
       };
       await saveUploadedVideo(persisted);
 
-      const url = URL.createObjectURL(payload.file);
+      const url = URL.createObjectURL(concreteBlob);
       objectUrlsRef.current.push(url);
 
       const newShort: ShortVideoItem = {
