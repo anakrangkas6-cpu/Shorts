@@ -5,6 +5,7 @@ import {
   inferVideoMimeType,
   isSupportedVideoFile,
 } from '../utils/effects';
+import { cacheBlobToNativeServer, isNativeAndroid } from './nativeMedia';
 
 export interface LocalFileEntry {
   file: File;
@@ -209,24 +210,42 @@ export async function buildShortItemsFromLocalEntriesAsync(
   profile: UserProfile,
   folderName: string,
 ): Promise<ShortVideoItem[]> {
+  const nativeAndroid = isNativeAndroid();
+
   return Promise.all(
     entries.map(async ({ file, relativePath }) => {
       const id = `folder:${relativePath}:${file.size}`;
       const saved = metaMap[id];
       const mime = inferVideoMimeType(file);
       let videoUrl = '';
+      let posterUrl: string | undefined;
+      let detectedDuration = saved?.duration ?? 0;
       let sourceBlob: Blob = file;
-      try {
-        if (file.size <= MAX_AUTO_MATERIALIZE_BYTES) {
-          const buffer = await file.arrayBuffer();
-          sourceBlob = new Blob([buffer], { type: mime });
-          videoUrl = URL.createObjectURL(sourceBlob);
-        } else {
-          sourceBlob = file.type ? file : new Blob([file], { type: mime });
-          videoUrl = URL.createObjectURL(sourceBlob);
+
+      if (nativeAndroid) {
+        const nativeMedia = await cacheBlobToNativeServer(id, file, mime);
+        if (nativeMedia?.url) {
+          videoUrl = nativeMedia.url;
+          posterUrl = nativeMedia.thumbUrl;
+          if (!detectedDuration && nativeMedia.duration) {
+            detectedDuration = nativeMedia.duration;
+          }
         }
-      } catch {
-        videoUrl = URL.createObjectURL(file);
+      }
+
+      if (!videoUrl) {
+        try {
+          if (file.size <= MAX_AUTO_MATERIALIZE_BYTES) {
+            const buffer = await file.arrayBuffer();
+            sourceBlob = new Blob([buffer], { type: mime });
+            videoUrl = URL.createObjectURL(sourceBlob);
+          } else {
+            sourceBlob = file.type ? file : new Blob([file], { type: mime });
+            videoUrl = URL.createObjectURL(sourceBlob);
+          }
+        } catch {
+          videoUrl = URL.createObjectURL(file);
+        }
       }
 
       return {
@@ -239,8 +258,9 @@ export async function buildShortItemsFromLocalEntriesAsync(
         fileName: file.name,
         relativePath,
         fileSize: file.size,
-        duration: saved?.duration ?? 0,
+        duration: detectedDuration,
         videoUrl,
+        posterUrl,
         sourceFile: file,
         sourceBlob,
         createdAt: file.lastModified || Date.now(),
